@@ -17,6 +17,7 @@ import {
   adicionarColunaGCLotesSeNaoExistir_safe,
   getStatusGCLotes,
   setStatusGCLotes,
+  iniciarEvento,
 } from "./services/eventosService";
 
 import {
@@ -269,14 +270,69 @@ app.get("/eventos/:id", (req, res) => {
   }
 });
 
-app.put("/eventos/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const { nome, data, descricao } = req.body;
+app.patch("/eventos/:id", (req, res) => {
   try {
-    editarEvento(id, nome, data, descricao);
-    res.status(204).send();
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao editar evento" });
+    const id = Number(req.params.id);
+    const {
+      nome,
+      data, // ISO
+      descricao,
+      condicao_pagamento_padrao,
+    } = req.body ?? {};
+
+    editarEvento(
+      id,
+      nome,
+      data,
+      descricao ?? null,
+      condicao_pagamento_padrao ?? null
+    );
+    const ev = getEventoPorId(id);
+    if (!ev) return res.status(404).json({ error: "Não encontrado" });
+    res.json(ev);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.patch("/eventos/:id/iniciar", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ev = iniciarEvento(id); // define start_time=agora se ainda não começou
+    res.json(ev);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.patch("/eventos/:id/encerrar", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ev = encerrarEvento(id); // define end_time=agora
+    res.json(ev);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put("/eventos/:id", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { nome, data, descricao, condicao_pagamento_padrao } = req.body ?? {};
+
+    editarEvento(
+      id,
+      nome,
+      data, // ISO
+      descricao ?? null,
+      condicao_pagamento_padrao ?? null // 👈 importante
+    );
+
+    const ev = getEventoPorId(id);
+    if (!ev) return res.status(404).json({ error: "Não encontrado" });
+    res.json(ev);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
   }
 });
 
@@ -290,20 +346,20 @@ app.delete("/eventos/:id", (req, res) => {
   res.status(204).send();
 });
 
-app.patch("/eventos/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const { end_time } = req.body;
-  if (!end_time) {
-    return res.status(400).json({ error: "Campo 'end_time' obrigatório" });
-  }
-  try {
-    encerrarEvento(id, end_time);
-    res.status(200).json({ message: "Evento encerrado com sucesso" });
-  } catch (error) {
-    console.error("Erro ao encerrar evento:", error);
-    res.status(500).json({ error: "Erro interno ao encerrar evento" });
-  }
-});
+// app.patch("/eventos/:id", (req, res) => {
+//   const id = Number(req.params.id);
+//   const { end_time } = req.body;
+//   if (!end_time) {
+//     return res.status(400).json({ error: "Campo 'end_time' obrigatório" });
+//   }
+//   try {
+//     encerrarEvento(id, end_time);
+//     res.status(200).json({ message: "Evento encerrado com sucesso" });
+//   } catch (error) {
+//     console.error("Erro ao encerrar evento:", error);
+//     res.status(500).json({ error: "Erro interno ao encerrar evento" });
+//   }
+// });
 
 /** Lotes - Upload via Excel */
 const upload = multer({ storage: multer.memoryStorage() });

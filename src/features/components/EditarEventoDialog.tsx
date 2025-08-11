@@ -1,142 +1,181 @@
-// src/features/eventos/components/EditarEventoDialog.tsx
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogTrigger,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { CalendarIcon } from "lucide-react";
-import { format } from "date-fns";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { cn } from "@/lib/utils";
-import { apiFetch } from "@/lib/api";
-import { toast } from "sonner";
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/ui/select";
+import { apiFetch } from "@/lib/apiFetch";
 
-const formSchema = z.object({
-  nome: z.string().min(3, "Nome obrigatório"),
-  data: z.date({ required_error: "Data obrigatória" }),
-  descricao: z.string().optional(),
-});
+import EditarEventoDialog from "../components/EditarEventoDialog";
 
-type EditarEventoDialogProps = {
-  evento: {
-    id: number;
-    nome: string;
-    data: string;
-    descricao?: string;
-  };
-  onSave?: () => void;
+
+type Evento = {
+  id: number;
+  nome: string;
+  data: string; // ISO
+  descricao?: string | null;
+  condicao_pagamento_padrao?: string | null;
 };
 
-export function EditarEventoDialog({ evento, onSave }: EditarEventoDialogProps) {
-  const [open, setOpen] = useState(false);
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-    setValue,
-    watch,
-  } = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      nome: evento.nome,
-      data: new Date(evento.data),
-      descricao: evento.descricao || "",
-    },
+const OPCOES = [
+  "2 + 2 + 2 + 2 + 2 + 40 = 50",
+  "2 + 2 + 2 + 2 + 20 = 30",
+  "3 + 3 + 3 + 31 = 40",
+  "À vista",
+  "Outro",
+];
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  evento: Evento;
+  onSaved?: () => void;
+}
+
+export default function EditarEventoDialog({
+  open,
+  onOpenChange,
+  evento,
+  onSaved,
+}: Props) {
+  const [nome, setNome] = useState(evento?.nome ?? "");
+  const [descricao, setDescricao] = useState(evento?.descricao ?? "");
+  const [condicao, setCondicao] = useState(
+    evento?.condicao_pagamento_padrao ?? ""
+  );
+  const [condicaoPreset, setCondicaoPreset] = useState<string>(() => {
+    const encontrada = OPCOES.find(
+      (o) => o !== "Outro" && o === (evento?.condicao_pagamento_padrao ?? "")
+    );
+    return encontrada ?? (evento?.condicao_pagamento_padrao ? "Outro" : "");
   });
+  const [condicaoCustom, setCondicaoCustom] = useState(
+    condicaoPreset === "Outro" ? evento?.condicao_pagamento_padrao ?? "" : ""
+  );
 
-  const data = watch("data");
+  // datetime-local precisa de "YYYY-MM-DDTHH:mm"
+  const dataLocalDefault = useMemo(() => {
+    const d = evento?.data ? new Date(evento.data) : new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+      d.getDate()
+    )}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [evento?.data]);
+  const [dataLocal, setDataLocal] = useState(dataLocalDefault);
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
-    try {
-      await apiFetch(`/eventos/${evento.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          nome: values.nome,
-          data: values.data.toISOString(),
-          descricao: values.descricao,
-        }),
-      });
-      toast.success("Evento atualizado");
-      setOpen(false);
-      onSave?.();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e?.message || "Erro ao atualizar evento");
+  useEffect(() => {
+    setNome(evento?.nome ?? "");
+    setDescricao(evento?.descricao ?? "");
+    setCondicao(evento?.condicao_pagamento_padrao ?? "");
+    setCondicaoPreset((prev) => {
+      const encontrada = OPCOES.find(
+        (o) => o !== "Outro" && o === (evento?.condicao_pagamento_padrao ?? "")
+      );
+      return encontrada ?? (evento?.condicao_pagamento_padrao ? "Outro" : "");
+    });
+    setCondicaoCustom(evento?.condicao_pagamento_padrao ?? "");
+    const d = evento?.data ? new Date(evento.data) : new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setDataLocal(
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+        d.getHours()
+      )}:${pad(d.getMinutes())}`
+    );
+  }, [evento, open]);
+
+  useEffect(() => {
+    if (condicaoPreset === "Outro") {
+      setCondicao(condicaoCustom);
+    } else if (condicaoPreset) {
+      setCondicao(condicaoPreset);
     }
+  }, [condicaoPreset, condicaoCustom]);
+
+  
+
+  async function handleSalvar() {
+    const body = {
+      nome,
+      descricao: descricao || null,
+      data: new Date(dataLocal).toISOString(),
+      condicao_pagamento_padrao: condicao || null,
+    };
+    await apiFetch(`/eventos/${evento.id}`, { method: "PATCH", json: body });
+    onSaved?.();
+    onOpenChange(false);
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline">Editar</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Editar evento</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
           <div>
-            <Label>Nome do Evento</Label>
-            <Input {...register("nome")} />
-            {errors.nome && (
-              <p className="text-red-500 text-sm">{errors.nome.message}</p>
-            )}
+            <Label>Nome</Label>
+            <Input value={nome} onChange={(e) => setNome(e.target.value)} />
           </div>
 
           <div>
-            <Label>Data e Hora</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left",
-                    !data && "text-muted-foreground"
-                  )}
-                >
-                  {data ? (
-                    format(data, "dd/MM/yyyy HH:mm")
-                  ) : (
-                    <span>Selecionar data</span>
-                  )}
-                  <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="p-0">
-                <Calendar
-                  mode="single"
-                  selected={data}
-                  onSelect={(date) => date && setValue("data", date)}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
-            {errors.data && (
-              <p className="text-red-500 text-sm">{errors.data.message}</p>
-            )}
+            <Label>Data e hora</Label>
+            <Input
+              type="datetime-local"
+              value={dataLocal}
+              onChange={(e) => setDataLocal(e.target.value)}
+            />
           </div>
 
           <div>
             <Label>Descrição</Label>
-            <Textarea {...register("descricao")} />
+            <Input
+              value={descricao ?? ""}
+              onChange={(e) => setDescricao(e.target.value)}
+            />
           </div>
 
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Salvando..." : "Salvar"}
-          </Button>
-        </form>
+          <div className="space-y-2">
+            <Label>Condição de pagamento padrão</Label>
+            <Select value={condicaoPreset} onValueChange={setCondicaoPreset}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {OPCOES.map((op) => (
+                  <SelectItem key={op} value={op}>
+                    {op}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {condicaoPreset === "Outro" && (
+              <Input
+                placeholder="Descreva a condição"
+                value={condicaoCustom}
+                onChange={(e) => setCondicaoCustom(e.target.value)}
+              />
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSalvar}>Salvar</Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

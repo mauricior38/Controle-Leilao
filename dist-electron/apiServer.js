@@ -182,15 +182,55 @@ app.get("/eventos/:id", (req, res) => {
         res.status(500).json({ error: "Erro interno ao obter evento" });
     }
 });
-app.put("/eventos/:id", (req, res) => {
-    const id = Number(req.params.id);
-    const { nome, data, descricao } = req.body;
+app.patch("/eventos/:id", (req, res) => {
     try {
-        (0, eventosService_1.editarEvento)(id, nome, data, descricao);
-        res.status(204).send();
+        const id = Number(req.params.id);
+        const { nome, data, // ISO
+        descricao, condicao_pagamento_padrao, } = req.body ?? {};
+        (0, eventosService_1.editarEvento)(id, nome, data, descricao ?? null, condicao_pagamento_padrao ?? null);
+        const ev = (0, eventosService_1.getEventoPorId)(id);
+        if (!ev)
+            return res.status(404).json({ error: "Não encontrado" });
+        res.json(ev);
     }
-    catch (error) {
-        res.status(500).json({ error: "Erro ao editar evento" });
+    catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.patch("/eventos/:id/iniciar", (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const ev = (0, eventosService_1.iniciarEvento)(id); // define start_time=agora se ainda não começou
+        res.json(ev);
+    }
+    catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.patch("/eventos/:id/encerrar", (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const ev = (0, eventosService_1.encerrarEvento)(id); // define end_time=agora
+        res.json(ev);
+    }
+    catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.put("/eventos/:id", (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const { nome, data, descricao, condicao_pagamento_padrao } = req.body ?? {};
+        (0, eventosService_1.editarEvento)(id, nome, data, // ISO
+        descricao ?? null, condicao_pagamento_padrao ?? null // 👈 importante
+        );
+        const ev = (0, eventosService_1.getEventoPorId)(id);
+        if (!ev)
+            return res.status(404).json({ error: "Não encontrado" });
+        res.json(ev);
+    }
+    catch (e) {
+        res.status(400).json({ error: e.message });
     }
 });
 app.delete("/eventos/:id", (req, res) => {
@@ -202,21 +242,20 @@ app.delete("/eventos/:id", (req, res) => {
             .json({ error: "Evento não encontrado para deletar" });
     res.status(204).send();
 });
-app.patch("/eventos/:id", (req, res) => {
-    const id = Number(req.params.id);
-    const { end_time } = req.body;
-    if (!end_time) {
-        return res.status(400).json({ error: "Campo 'end_time' obrigatório" });
-    }
-    try {
-        (0, eventosService_1.encerrarEvento)(id, end_time);
-        res.status(200).json({ message: "Evento encerrado com sucesso" });
-    }
-    catch (error) {
-        console.error("Erro ao encerrar evento:", error);
-        res.status(500).json({ error: "Erro interno ao encerrar evento" });
-    }
-});
+// app.patch("/eventos/:id", (req, res) => {
+//   const id = Number(req.params.id);
+//   const { end_time } = req.body;
+//   if (!end_time) {
+//     return res.status(400).json({ error: "Campo 'end_time' obrigatório" });
+//   }
+//   try {
+//     encerrarEvento(id, end_time);
+//     res.status(200).json({ message: "Evento encerrado com sucesso" });
+//   } catch (error) {
+//     console.error("Erro ao encerrar evento:", error);
+//     res.status(500).json({ error: "Erro interno ao encerrar evento" });
+//   }
+// });
 /** Lotes - Upload via Excel */
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 app.post("/lotes/upload", upload.single("file"), async (req, res) => {

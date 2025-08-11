@@ -66,3 +66,12 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes pulse-smooth {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.pulse-smooth {
+  animation: pulse-smooth 1.5s ease-in-out infinite;
+}

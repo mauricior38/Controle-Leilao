@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 export interface Evento {
   id: number;
   nome: string;
-  data: string;
+  data: string; // ISO
   descricao?: string | null;
   start_time?: string | null;
   end_time?: string | null;
@@ -14,6 +14,9 @@ export interface Evento {
 const dbPath = path.resolve(__dirname, "../../data.db");
 const db = new Database(dbPath);
 
+/* =========================================
+   CRIAÇÃO DE TABELAS
+========================================= */
 export function criarTabelaEventos() {
   db.prepare(
     `
@@ -24,7 +27,8 @@ export function criarTabelaEventos() {
       descricao TEXT,
       start_time TEXT,
       end_time TEXT,
-      condicao_pagamento_padrao TEXT
+      condicao_pagamento_padrao TEXT,
+      gc_lotes_on INTEGER DEFAULT 0
     )
   `
   ).run();
@@ -117,12 +121,56 @@ export function criarTabelaEventos() {
   `
   ).run();
 
-  // Coluna de status GC LOTES (on/off) no evento
+  // Garante coluna (idempotente)
   adicionarColunaGCLotesSeNaoExistir_safe();
 }
 
+/* =========================================
+   HELPERS TIPADOS
+========================================= */
+function rowToEvento(row: any | undefined): Evento | null {
+  if (!row) return null;
+  // Mantemos as chaves conforme a tabela
+  return row as Evento;
+}
+
+function getEventoByIdInternal(id: number): Evento | null {
+  const row = db.prepare(`SELECT * FROM eventos WHERE id = ?`).get(id);
+  return rowToEvento(row);
+}
+
+function isStarted(ev: Evento): boolean {
+  if (!ev.start_time) return false;
+  return Date.now() >= new Date(ev.start_time).getTime();
+}
+
+function isEnded(ev: Evento): boolean {
+  return ev.end_time != null;
+}
+
+/**
+ * Se o evento NÃO começou e NÃO terminou, sincroniza start_time = novoStartISO
+ */
+function atualizarStartTimeSeNaoIniciado(id: number, novoStartISO: string) {
+  const ev = getEventoByIdInternal(id);
+  if (!ev) throw new Error("Evento não encontrado");
+
+  if (!isStarted(ev) && !isEnded(ev)) {
+    db.prepare(`UPDATE eventos SET start_time = ? WHERE id = ?`).run(
+      novoStartISO,
+      id
+    );
+  }
+}
+
+/* =========================================
+   API DO SERVIÇO
+========================================= */
 export function listarEventos(): Evento[] {
-  return db.prepare(`SELECT * FROM eventos ORDER BY id ASC`).all() as Evento[];
+  const rows = db
+    .prepare(`SELECT * FROM eventos ORDER BY id ASC`)
+    .all() as any[];
+  return rows.map(rowToEvento) as Evento[];
 }
 
 export function inserirEvento(
@@ -146,8 +194,7 @@ export function inserirEvento(
 }
 
 export function getEventoPorId(id: number): Evento | null {
-  const evento = db.prepare("SELECT * FROM eventos WHERE id = ?").get(id);
-  return evento ? (evento as Evento) : null;
+  return getEventoByIdInternal(id);
 }
 
 export function deletarEvento(id: number): boolean {
@@ -155,21 +202,68 @@ export function deletarEvento(id: number): boolean {
   return result.changes > 0;
 }
 
+/**
+ * Edita nome/data/descricao. Se a `data` (ISO) for informada e o evento ainda
+ * não tiver começado/terminado, sincroniza `start_time = data`.
+ */
+// ...
 export function editarEvento(
   id: number,
-  nome: string,
-  data: string,
-  descricao?: string
+  nome?: string,
+  data?: string, // ISO
+  descricao?: string | null,
+  condicao_pagamento_padrao?: string | null
 ) {
   db.prepare(
-    "UPDATE eventos SET nome = ?, data = ?, descricao = ? WHERE id = ?"
-  ).run(nome, data, descricao || null, id);
+    `UPDATE eventos
+        SET nome = COALESCE(@nome, nome),
+            data = COALESCE(@data, data),
+            descricao = COALESCE(@descricao, descricao),
+            condicao_pagamento_padrao = COALESCE(@condicao_pagamento_padrao, condicao_pagamento_padrao)
+      WHERE id = @id`
+  ).run({ id, nome, data, descricao, condicao_pagamento_padrao });
+
+  // Se data mudou e o evento ainda não começou/terminou, sincroniza start_time
+  if (data) atualizarStartTimeSeNaoIniciado(id, data);
 }
 
-export function encerrarEvento(id: number, endTime: string): void {
-  db.prepare("UPDATE eventos SET end_time = ? WHERE id = ?").run(endTime, id);
+/** Define start_time = agora se ainda não começou e não terminou. Retorna evento atualizado. */
+export function iniciarEvento(id: number): Evento {
+  const ev = getEventoByIdInternal(id);
+  if (!ev) throw new Error("Evento não encontrado");
+
+  if (isEnded(ev)) return ev;
+
+  const jaComecou = isStarted(ev);
+  if (!jaComecou) {
+    const agoraISO = new Date().toISOString();
+    db.prepare(`UPDATE eventos SET start_time = ? WHERE id = ?`).run(
+      agoraISO,
+      id
+    );
+  }
+
+  const atualizado = getEventoByIdInternal(id);
+  if (!atualizado) throw new Error("Falha ao iniciar evento");
+  return atualizado;
 }
 
+/** Define end_time = agora. Retorna evento atualizado. */
+export function encerrarEvento(id: number): Evento {
+  const ev = getEventoByIdInternal(id);
+  if (!ev) throw new Error("Evento não encontrado");
+
+  const agoraISO = new Date().toISOString();
+  db.prepare("UPDATE eventos SET end_time = ? WHERE id = ?").run(agoraISO, id);
+
+  const atualizado = getEventoByIdInternal(id);
+  if (!atualizado) throw new Error("Falha ao encerrar evento");
+  return atualizado;
+}
+
+/* =========================================
+   COLUNAS E FLAGS
+========================================= */
 export function adicionarColunaCondicaoPagamentoPadrao() {
   try {
     db.prepare("SELECT condicao_pagamento_padrao FROM eventos LIMIT 1").get();
@@ -183,7 +277,7 @@ export function adicionarColunaCondicaoPagamentoPadrao() {
   }
 }
 
-/** GC LOTES: coluna booleana no evento */
+/** GC LOTES: coluna booleana no evento (idempotente) */
 export function adicionarColunaGCLotesSeNaoExistir_safe() {
   try {
     const cols = db.prepare("PRAGMA table_info(eventos)").all() as {
@@ -200,12 +294,14 @@ export function adicionarColunaGCLotesSeNaoExistir_safe() {
     console.error("Erro ao verificar/criar coluna gc_lotes_on:", err);
   }
 }
+
 export function getStatusGCLotes(eventoId: number): boolean {
   const row = db
     .prepare(`SELECT gc_lotes_on FROM eventos WHERE id = ?`)
     .get(eventoId) as { gc_lotes_on?: number } | undefined;
   return row?.gc_lotes_on === 1;
 }
+
 export function setStatusGCLotes(eventoId: number, on: boolean) {
   db.prepare(`UPDATE eventos SET gc_lotes_on = ? WHERE id = ?`).run(
     on ? 1 : 0,

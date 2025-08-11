@@ -24,7 +24,7 @@ export default function EventosPage() {
       const res = await apiFetch("/eventos");
       const data = await res.json();
       setEventos(data);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error("Erro ao carregar eventos:", err);
       setErrorMsg(err?.message || "Falha ao carregar eventos");
@@ -63,11 +63,34 @@ export default function EventosPage() {
                 className="border p-4 rounded hover:bg-muted transition"
               >
                 <Link to={`/eventos/${evento.id}`} className="block">
-                  <div className="font-semibold">{evento.nome}</div>
-                  <div className="text-sm opacity-60">
-                    {new Date(evento.data).toLocaleString()}
+                  <div className="flex items-center gap-4">
+                    <div className="bg-current max-w-[80px] px-2 py-1 rounded-lg">
+                      <div className="flex flex-col items-center">
+                        <p className="text-white font-extralight text-sm">
+                          DIA
+                        </p>
+                        <span className="text-white font-bold text-3xl">
+                          {new Date(evento.data).toLocaleDateString("pt-BR", {
+                            day: "numeric",
+                          })}
+                        </span>
+                        <span className="text-white font-extralight text-sm">
+                          {new Date(evento.data).toLocaleDateString("pt-BR", {
+                            weekday: "short",
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold">{evento.nome}</div>
+                      <div className="text-sm opacity-60">
+                        {new Date(evento.data).toLocaleString()}
+                      </div>
+                      <div className="text-sm opacity-60">
+                        Evento Id: {evento.id}
+                      </div>
+                    </div>
                   </div>
-                  {evento.descricao && <p>{evento.descricao}</p>}
                 </Link>
               </li>
             ))}

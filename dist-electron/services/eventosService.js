@@ -9,6 +9,7 @@ exports.inserirEvento = inserirEvento;
 exports.getEventoPorId = getEventoPorId;
 exports.deletarEvento = deletarEvento;
 exports.editarEvento = editarEvento;
+exports.iniciarEvento = iniciarEvento;
 exports.encerrarEvento = encerrarEvento;
 exports.adicionarColunaCondicaoPagamentoPadrao = adicionarColunaCondicaoPagamentoPadrao;
 exports.adicionarColunaGCLotesSeNaoExistir_safe = adicionarColunaGCLotesSeNaoExistir_safe;
@@ -18,6 +19,9 @@ const path_1 = __importDefault(require("path"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const dbPath = path_1.default.resolve(__dirname, "../../data.db");
 const db = new better_sqlite3_1.default(dbPath);
+/* =========================================
+   CRIAÇÃO DE TABELAS
+========================================= */
 function criarTabelaEventos() {
     db.prepare(`
     CREATE TABLE IF NOT EXISTS eventos (
@@ -27,7 +31,8 @@ function criarTabelaEventos() {
       descricao TEXT,
       start_time TEXT,
       end_time TEXT,
-      condicao_pagamento_padrao TEXT
+      condicao_pagamento_padrao TEXT,
+      gc_lotes_on INTEGER DEFAULT 0
     )
   `).run();
     db.prepare(`
@@ -91,11 +96,49 @@ function criarTabelaEventos() {
       FOREIGN KEY (gc_id) REFERENCES gc_duas_linhas(id)
     )
   `).run();
-    // Coluna de status GC LOTES (on/off) no evento
+    // Garante coluna (idempotente)
     adicionarColunaGCLotesSeNaoExistir_safe();
 }
+/* =========================================
+   HELPERS TIPADOS
+========================================= */
+function rowToEvento(row) {
+    if (!row)
+        return null;
+    // Mantemos as chaves conforme a tabela
+    return row;
+}
+function getEventoByIdInternal(id) {
+    const row = db.prepare(`SELECT * FROM eventos WHERE id = ?`).get(id);
+    return rowToEvento(row);
+}
+function isStarted(ev) {
+    if (!ev.start_time)
+        return false;
+    return Date.now() >= new Date(ev.start_time).getTime();
+}
+function isEnded(ev) {
+    return ev.end_time != null;
+}
+/**
+ * Se o evento NÃO começou e NÃO terminou, sincroniza start_time = novoStartISO
+ */
+function atualizarStartTimeSeNaoIniciado(id, novoStartISO) {
+    const ev = getEventoByIdInternal(id);
+    if (!ev)
+        throw new Error("Evento não encontrado");
+    if (!isStarted(ev) && !isEnded(ev)) {
+        db.prepare(`UPDATE eventos SET start_time = ? WHERE id = ?`).run(novoStartISO, id);
+    }
+}
+/* =========================================
+   API DO SERVIÇO
+========================================= */
 function listarEventos() {
-    return db.prepare(`SELECT * FROM eventos ORDER BY id ASC`).all();
+    const rows = db
+        .prepare(`SELECT * FROM eventos ORDER BY id ASC`)
+        .all();
+    return rows.map(rowToEvento);
 }
 function inserirEvento(nome, data, descricao, start_time, condicao_pagamento_padrao) {
     const isoData = data.toISOString();
@@ -103,19 +146,61 @@ function inserirEvento(nome, data, descricao, start_time, condicao_pagamento_pad
      VALUES (?, ?, ?, ?, ?)`).run(nome, isoData, descricao ?? null, start_time ?? null, condicao_pagamento_padrao ?? null);
 }
 function getEventoPorId(id) {
-    const evento = db.prepare("SELECT * FROM eventos WHERE id = ?").get(id);
-    return evento ? evento : null;
+    return getEventoByIdInternal(id);
 }
 function deletarEvento(id) {
     const result = db.prepare("DELETE FROM eventos WHERE id = ?").run(id);
     return result.changes > 0;
 }
-function editarEvento(id, nome, data, descricao) {
-    db.prepare("UPDATE eventos SET nome = ?, data = ?, descricao = ? WHERE id = ?").run(nome, data, descricao || null, id);
+/**
+ * Edita nome/data/descricao. Se a `data` (ISO) for informada e o evento ainda
+ * não tiver começado/terminado, sincroniza `start_time = data`.
+ */
+// ...
+function editarEvento(id, nome, data, // ISO
+descricao, condicao_pagamento_padrao) {
+    db.prepare(`UPDATE eventos
+        SET nome = COALESCE(@nome, nome),
+            data = COALESCE(@data, data),
+            descricao = COALESCE(@descricao, descricao),
+            condicao_pagamento_padrao = COALESCE(@condicao_pagamento_padrao, condicao_pagamento_padrao)
+      WHERE id = @id`).run({ id, nome, data, descricao, condicao_pagamento_padrao });
+    // Se data mudou e o evento ainda não começou/terminou, sincroniza start_time
+    if (data)
+        atualizarStartTimeSeNaoIniciado(id, data);
 }
-function encerrarEvento(id, endTime) {
-    db.prepare("UPDATE eventos SET end_time = ? WHERE id = ?").run(endTime, id);
+/** Define start_time = agora se ainda não começou e não terminou. Retorna evento atualizado. */
+function iniciarEvento(id) {
+    const ev = getEventoByIdInternal(id);
+    if (!ev)
+        throw new Error("Evento não encontrado");
+    if (isEnded(ev))
+        return ev;
+    const jaComecou = isStarted(ev);
+    if (!jaComecou) {
+        const agoraISO = new Date().toISOString();
+        db.prepare(`UPDATE eventos SET start_time = ? WHERE id = ?`).run(agoraISO, id);
+    }
+    const atualizado = getEventoByIdInternal(id);
+    if (!atualizado)
+        throw new Error("Falha ao iniciar evento");
+    return atualizado;
 }
+/** Define end_time = agora. Retorna evento atualizado. */
+function encerrarEvento(id) {
+    const ev = getEventoByIdInternal(id);
+    if (!ev)
+        throw new Error("Evento não encontrado");
+    const agoraISO = new Date().toISOString();
+    db.prepare("UPDATE eventos SET end_time = ? WHERE id = ?").run(agoraISO, id);
+    const atualizado = getEventoByIdInternal(id);
+    if (!atualizado)
+        throw new Error("Falha ao encerrar evento");
+    return atualizado;
+}
+/* =========================================
+   COLUNAS E FLAGS
+========================================= */
 function adicionarColunaCondicaoPagamentoPadrao() {
     try {
         db.prepare("SELECT condicao_pagamento_padrao FROM eventos LIMIT 1").get();
@@ -125,7 +210,7 @@ function adicionarColunaCondicaoPagamentoPadrao() {
         console.log("✅ Coluna 'condicao_pagamento_padrao' adicionada à tabela eventos.");
     }
 }
-/** GC LOTES: coluna booleana no evento */
+/** GC LOTES: coluna booleana no evento (idempotente) */
 function adicionarColunaGCLotesSeNaoExistir_safe() {
     try {
         const cols = db.prepare("PRAGMA table_info(eventos)").all();
