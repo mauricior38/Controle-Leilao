@@ -13,6 +13,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import { apiFetch } from "@/lib/api";
 
 const formSchema = z.object({
   valor: z.coerce.number(),
@@ -98,12 +99,17 @@ export default function CadastrarLoteModal({
   }, [loteBase, reset]);
 
   useEffect(() => {
-    fetch(`http://localhost:3030/eventos/${eventoId}`)
-      .then((res) => res.json())
-      .then(setEvento)
-      .catch((err) => {
+    async function carregarEvento() {
+      try {
+        const res = await apiFetch(`/eventos/${eventoId}`);
+        const data = await res.json();
+        setEvento(data);
+      } catch (err) {
         console.error("Erro ao buscar evento:", err);
-      });
+        toast.error("Falha ao carregar informações do evento");
+      }
+    }
+    carregarEvento();
   }, [eventoId]);
 
   const condicoesPredefinidas = [
@@ -132,30 +138,35 @@ export default function CadastrarLoteModal({
   };
 
   async function onSubmit(data: FormData) {
-    const condicaoFinal = data.condicao_pagamento?.trim()
-      ? data.condicao_pagamento
-      : evento?.condicao_pagamento_padrao ?? "";
+    try {
+      const condicaoFinal = data.condicao_pagamento?.trim()
+        ? data.condicao_pagamento
+        : evento?.condicao_pagamento_padrao ?? "";
 
-    const payload = {
-      ...data,
-      evento_id: eventoId,
-      condicao_pagamento: condicaoFinal,
-    };
+      const payload = {
+        ...data,
+        evento_id: eventoId,
+        condicao_pagamento: condicaoFinal,
+      };
 
-    const res = await fetch("http://localhost:3030/lotes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+      const res = await apiFetch("/lotes", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
 
-    if (res.ok) {
-      toast.success("Lote cadastrado com sucesso");
-      onSuccess();
-      reset();
-      setCondicaoSelecionada("");
-      setOutraCondicao("");
-    } else {
-      toast.error("Erro ao cadastrar lote");
+      if (res.ok) {
+        toast.success("Lote cadastrado com sucesso");
+        onSuccess();
+        reset();
+        setCondicaoSelecionada("");
+        setOutraCondicao("");
+      } else {
+        toast.error("Erro ao cadastrar lote");
+      }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || "Erro ao cadastrar lote");
     }
   }
 

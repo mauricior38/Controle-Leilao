@@ -3,6 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.adicionarColunaGCLotesSeNaoExistir_safe = adicionarColunaGCLotesSeNaoExistir_safe;
+exports.getStatusGCLotes = getStatusGCLotes;
+exports.setStatusGCLotes = setStatusGCLotes;
 exports.criarTabelaLotes = criarTabelaLotes;
 exports.adicionarColunaStatusSeNaoExistir = adicionarColunaStatusSeNaoExistir;
 exports.adicionarColunaIncompletoSeNaoExistir = adicionarColunaIncompletoSeNaoExistir;
@@ -21,6 +24,29 @@ exports.contarLancesPorLote = contarLancesPorLote;
 exports.getLancesDeLote = getLancesDeLote;
 exports.getRelatorioDoEvento = getRelatorioDoEvento;
 const db_1 = __importDefault(require("../lib/db"));
+// --- MIGRAÇÃO: garante a coluna gc_lotes_on ---
+function adicionarColunaGCLotesSeNaoExistir_safe() {
+    // checa metadados da tabela
+    const cols = db_1.default.prepare("PRAGMA table_info(eventos)").all();
+    const hasCol = cols.some((c) => c.name === "gc_lotes_on");
+    if (!hasCol) {
+        db_1.default.prepare("ALTER TABLE eventos ADD COLUMN gc_lotes_on INTEGER DEFAULT 0").run();
+    }
+    // normaliza valores nulos
+    db_1.default.prepare("UPDATE eventos SET gc_lotes_on = COALESCE(gc_lotes_on, 0)").run();
+}
+// --- GET status GC_LOTES por evento ---
+function getStatusGCLotes(eventoId) {
+    const row = db_1.default
+        .prepare("SELECT gc_lotes_on FROM eventos WHERE id = ?")
+        .get(eventoId);
+    // se não achou, retorna false; se achou, true somente se === 1
+    return !!(row && Number(row.gc_lotes_on) === 1);
+}
+// --- SET status GC_LOTES por evento ---
+function setStatusGCLotes(eventoId, on) {
+    db_1.default.prepare("UPDATE eventos SET gc_lotes_on = ? WHERE id = ?").run(on ? 1 : 0, eventoId);
+}
 // Criação da tabela
 function criarTabelaLotes() {
     db_1.default.prepare(`
@@ -246,7 +272,7 @@ function getRelatorioDoEvento(eventoId) {
             nome_animal: l.nome_animal,
             valor: valorNumber,
             condicao_pagamento: l.condicao_pagamento ?? "",
-            valor_total: valorTotal
+            valor_total: valorTotal,
         };
     });
 }

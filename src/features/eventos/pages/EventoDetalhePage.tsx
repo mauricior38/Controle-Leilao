@@ -13,6 +13,10 @@ import { RelatorioTab } from "@/features/components/RelatorioTab";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import GcDuasLinhasTab from "@/features/components/GcDuasLinhasTab";
 import GcDuasLinhasNoAr from "@/features/components/GcDuasLinhasNoAr";
+import { apiFetch } from "@/lib/api";
+import { Label } from "@radix-ui/react-label";
+import ConfigEventoTab from "@/features/components/ConfigEventoTab";
+import { TelefonesTab } from "@/features/components/TelefonesTab";
 
 interface Evento {
   id: number;
@@ -27,19 +31,33 @@ interface Evento {
 export default function EventoDetalhePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const [evento, setEvento] = useState<Evento | null>(null);
   const [editando, setEditando] = useState(false);
   const [refreshPista, setRefreshPista] = useState(0);
   const [countdown, setCountdown] = useState("");
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const [refreshGCNoAr, setRefreshGCNoAr] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  async function carregarEvento(eventoId: string) {
+    try {
+      setLoading(true);
+      setErrorMsg("");
+      const res = await apiFetch(`/eventos/${eventoId}`);
+      const data = await res.json();
+      setEvento(data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Falha ao carregar evento");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    if (id) {
-      fetch(`http://localhost:3030/eventos/${id}`)
-        .then((res) => res.json())
-        .then(setEvento);
-    }
+    if (id) carregarEvento(id);
   }, [id]);
 
   // ⏳ Cronômetro regressivo
@@ -65,64 +83,79 @@ export default function EventoDetalhePage() {
     return () => clearInterval(interval);
   }, [evento?.start_time]);
 
-  function handleDeletar() {
+  async function handleDeletar() {
     if (!id) return;
-    fetch(`http://localhost:3030/eventos/${id}`, {
-      method: "DELETE",
-    })
-      .then(() => navigate("/"))
-      .catch((err) => console.error(err));
+    try {
+      setLoading(true);
+      await apiFetch(`/eventos/${id}`, { method: "DELETE" });
+      navigate("/");
+    } catch (e) {
+      console.error(e);
+      setErrorMsg("Erro ao excluir evento");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleAtualizar() {
     if (!id || !evento) return;
-
-    const response = await fetch(`http://localhost:3030/eventos/${id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        nome: evento.nome,
-        data: evento.data,
-        descricao: evento.descricao,
-      }),
-    });
-
-    if (response.ok) {
+    try {
+      setLoading(true);
+      await apiFetch(`/eventos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          nome: evento.nome,
+          data: evento.data,
+          descricao: evento.descricao,
+        }),
+      });
       setEditando(false);
-    } else {
-      console.error("Erro ao atualizar evento");
+      await carregarEvento(id); // refaz GET (PUT retorna 204)
+    } catch (e) {
+      console.error(e);
+      setErrorMsg("Erro ao atualizar evento");
+    } finally {
+      setLoading(false);
     }
   }
 
   async function encerrarEvento() {
     if (!id) return;
-
-    await fetch(`http://localhost:3030/eventos/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ end_time: new Date().toISOString() }),
-    });
-
-    const updated = await fetch(`http://localhost:3030/eventos/${id}`).then(
-      (r) => r.json()
-    );
-    setEvento(updated);
+    try {
+      setLoading(true);
+      await apiFetch(`/eventos/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ end_time: new Date().toISOString() }),
+      });
+      await carregarEvento(id);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg("Erro ao encerrar evento");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  if (!evento) return <p className="p-6">Carregando evento...</p>;
+  if (!evento) {
+    return (
+      <p className="p-6">
+        {loading ? "Carregando evento..." : errorMsg || "Carregando evento..."}
+      </p>
+    );
+  }
 
   return (
     <>
       <div className="p-6 space-y-4">
         <div className="flex justify-between items-center">
-          {evento.condicao_pagamento_padrao}
+          {/* {evento.condicao_pagamento_padrao} */}
           {editando ? (
-            <Input
-              value={evento.nome}
-              onChange={(e) => setEvento({ ...evento, nome: e.target.value })}
-            />
+            <Label>
+              <Input
+                value={evento.nome}
+                onChange={(e) => setEvento({ ...evento, nome: e.target.value })}
+              />
+            </Label>
           ) : (
             <h1 className="text-2xl font-bold">
               {evento.nome} (ID: {evento.id})
@@ -130,7 +163,9 @@ export default function EventoDetalhePage() {
           )}
           <div className="flex gap-2">
             {editando ? (
-              <Button onClick={handleAtualizar}>Salvar Alterações</Button>
+              <Button onClick={handleAtualizar} disabled={loading}>
+                {loading ? "Salvando..." : "Salvar Alterações"}
+              </Button>
             ) : (
               <Button variant="secondary" onClick={() => setEditando(true)}>
                 Editar
@@ -193,6 +228,8 @@ export default function EventoDetalhePage() {
           </>
         )}
 
+        {errorMsg && <p className="text-red-500 text-sm">{errorMsg}</p>}
+
         {/* ✅ Cronômetro Regressivo */}
         {evento.start_time && !evento.end_time && countdown && (
           <div className="text-lg font-semibold text-green-600">
@@ -202,8 +239,12 @@ export default function EventoDetalhePage() {
 
         {/* ✅ Botão Encerrar Evento */}
         {evento.start_time && !evento.end_time && (
-          <Button variant="destructive" onClick={encerrarEvento}>
-            Encerrar Evento
+          <Button
+            variant="destructive"
+            onClick={encerrarEvento}
+            disabled={loading}
+          >
+            {loading ? "Encerrando..." : "Encerrar Evento"}
           </Button>
         )}
         <GcDuasLinhasNoAr eventoId={evento.id} refresh={refreshGCNoAr} />
@@ -222,6 +263,7 @@ export default function EventoDetalhePage() {
           <TabsTrigger value="duas_linhas">Duas Linhas</TabsTrigger>
           <TabsTrigger value="telefones">Telefones</TabsTrigger>
           <TabsTrigger value="relatorio">Relatório</TabsTrigger>
+          <TabsTrigger value="configuracao">Configurações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="lotes">
@@ -241,11 +283,15 @@ export default function EventoDetalhePage() {
         </TabsContent>
 
         <TabsContent value="telefones">
-          <div>Telefones</div>
+          <TelefonesTab eventoId={evento.id} />
         </TabsContent>
 
         <TabsContent value="relatorio">
           <RelatorioTab evento={evento} />
+        </TabsContent>
+
+        <TabsContent value="configuracao">
+          <ConfigEventoTab eventoId={evento.id} />
         </TabsContent>
       </Tabs>
     </>

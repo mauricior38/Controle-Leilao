@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
 
 interface GC {
   id: number;
@@ -16,10 +17,22 @@ export default function GcDuasLinhasNoAr({
   const [gc, setGC] = useState<GC | null>(null);
 
   useEffect(() => {
-    fetch(`http://localhost:3030/gc-duas-linhas-no-ar/${eventoId}`)
-      .then((res) => res.json())
-      .then(setGC)
-      .catch(() => setGC(null));
+    let active = true;
+
+    async function carregar() {
+      try {
+        const res = await apiFetch(`/gc-duas-linhas-no-ar/${eventoId}`);
+        const data = await res.json();
+        if (active) setGC(data || null);
+      } catch {
+        if (active) setGC(null);
+      }
+    }
+
+    carregar();
+    return () => {
+      active = false;
+    };
   }, [eventoId, refresh]);
 
   if (!gc) return null;

@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api";
 
 const condicoes = [
   "2 + 2 + 2 + 2 + 2 + 20 = 30",
@@ -51,7 +52,7 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
     setValue,
     watch,
     reset,
@@ -61,7 +62,7 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
 
   const data = watch("data");
   const condicao = watch("condicao_pagamento_padrao");
-  const horario = watch("horario");
+  // const horario = watch("horario");
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     try {
@@ -70,13 +71,12 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
       dataCompleta.setHours(Number(hora));
       dataCompleta.setMinutes(Number(minuto));
 
-      await fetch("http://localhost:3030/eventos", {
+      await apiFetch("/eventos", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nome: values.nome,
           data: dataCompleta.toISOString(),
-          start_time: dataCompleta.toISOString(), // ✅ importante!
+          start_time: dataCompleta.toISOString(),
           descricao: values.descricao,
           condicao_pagamento_padrao:
             values.condicao_pagamento_padrao === "outro"
@@ -88,12 +88,11 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
       toast.success("Evento criado com sucesso!");
       setOpen(false);
       reset();
-
-      // ✅ Notifica o componente pai para atualizar a lista
       onSave?.();
-    } catch (error) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
       console.error("Erro ao criar evento:", error);
-      toast.error("Erro ao criar evento");
+      toast.error(error?.message || "Erro ao criar evento");
     }
   };
 
@@ -118,6 +117,7 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
+                    type="button"
                     variant="outline"
                     className={cn(
                       "w-full justify-start text-left",
@@ -157,6 +157,7 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
           <div>
             <Label>Condição de Pagamento Padrão</Label>
             <Select
+              value={condicao}
               onValueChange={(value) =>
                 setValue("condicao_pagamento_padrao", value)
               }
@@ -188,7 +189,9 @@ export function NovoEventoDialog({ onSave }: { onSave?: () => void }) {
             <Textarea {...register("descricao")} />
           </div>
 
-          <Button type="submit">Salvar</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Salvando..." : "Salvar"}
+          </Button>
         </form>
       </DialogContent>
     </Dialog>

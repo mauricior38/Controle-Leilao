@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Pencil, Trash2 } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 interface GC {
   id: number;
@@ -21,13 +22,16 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
   const [cargo, setCargo] = useState("");
   const [gcs, setGCs] = useState<GC[]>([]);
   const [gcNoAr, setGCNoAr] = useState<GC | null>(null);
-
   const [modoEdicao, setModoEdicao] = useState<number | null>(null);
 
-  function carregarGCs() {
-    fetch(`http://localhost:3030/gc/${eventoId}`)
-      .then((res) => res.json())
-      .then(setGCs);
+  async function carregarGCs() {
+    try {
+      const res = await apiFetch(`/gc/${eventoId}`);
+      const data = await res.json();
+      setGCs(data);
+    } catch {
+      toast.error("Erro ao carregar GCs");
+    }
   }
 
   async function handleCadastrar() {
@@ -36,7 +40,7 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
       return;
     }
 
-    const res = await fetch("http://localhost:3030/gc", {
+    const res = await apiFetch("/gc", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ evento_id: eventoId, nome, cargo }),
@@ -58,7 +62,7 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
       return;
     }
 
-    const res = await fetch(`http://localhost:3030/gc/${id}`, {
+    const res = await apiFetch(`/gc/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nome, cargo }),
@@ -76,12 +80,12 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
   }
 
   async function handleExcluir(id: number) {
-    const confirm = window.confirm("Tem certeza que deseja excluir este GC?");
-    if (!confirm) return;
+    const confirmacao = window.confirm(
+      "Tem certeza que deseja excluir este GC?"
+    );
+    if (!confirmacao) return;
 
-    const res = await fetch(`http://localhost:3030/gc/${id}`, {
-      method: "DELETE",
-    });
+    const res = await apiFetch(`/gc/${id}`, { method: "DELETE" });
 
     if (res.ok) {
       toast.success("GC excluído com sucesso");
@@ -92,7 +96,7 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
   }
 
   async function handleColocarNoAr(gcId: number) {
-    const res = await fetch("http://localhost:3030/gc-duas-linhas-no-ar", {
+    const res = await apiFetch("/gc-duas-linhas-no-ar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ evento_id: eventoId, gc_id: gcId }),
@@ -107,12 +111,30 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
     }
   }
 
+  async function handleLimparNoAr(gcId: number) {
+    const res = await apiFetch("/gc-duas-linhas-no-ar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ evento_id: eventoId, gc_id: gcId }),
+    });
+
+    if (res.ok) {
+      toast.success("GC colocado no ar");
+      setNome("");
+      setCargo("");
+      setRefreshGCNoAr((prev) => !prev);
+    } else {
+      toast.error("Erro ao colocar GC no ar");
+    }
+  }
+
   useEffect(() => {
     carregarGCs();
 
-    fetch(`http://localhost:3030/gc-duas-linhas-no-ar/${eventoId}`)
+    apiFetch(`/gc-duas-linhas-no-ar/${eventoId}`)
       .then((res) => res.json())
-      .then(setGCNoAr);
+      .then(setGCNoAr)
+      .catch(() => setGCNoAr(null));
   }, [eventoId]);
 
   return (
@@ -153,7 +175,6 @@ export default function GcDuasLinhasTab({ eventoId, setRefreshGCNoAr }: Props) {
               <Button
                 variant={gcNoAr?.id === gc.id ? "no_ar" : "em_pista"}
                 size="sm"
-                // disabled={gcNoAr?.id === gc.id}
                 onClick={() => handleColocarNoAr(gc.id)}
               >
                 {gcNoAr?.id === gc.id ? "No ar" : "Colocar no ar"}

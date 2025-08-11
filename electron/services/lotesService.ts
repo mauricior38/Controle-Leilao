@@ -1,5 +1,43 @@
 import db from "../lib/db";
 
+// --- TIPOS AUXILIARES ---
+type TableInfoRow = { name: string };
+type RowGCLotes = { gc_lotes_on?: number };
+
+// --- MIGRAÇÃO: garante a coluna gc_lotes_on ---
+export function adicionarColunaGCLotesSeNaoExistir_safe() {
+  // checa metadados da tabela
+  const cols = db.prepare("PRAGMA table_info(eventos)").all() as TableInfoRow[];
+
+  const hasCol = cols.some((c) => c.name === "gc_lotes_on");
+  if (!hasCol) {
+    db.prepare(
+      "ALTER TABLE eventos ADD COLUMN gc_lotes_on INTEGER DEFAULT 0"
+    ).run();
+  }
+
+  // normaliza valores nulos
+  db.prepare("UPDATE eventos SET gc_lotes_on = COALESCE(gc_lotes_on, 0)").run();
+}
+
+// --- GET status GC_LOTES por evento ---
+export function getStatusGCLotes(eventoId: number): boolean {
+  const row = db
+    .prepare("SELECT gc_lotes_on FROM eventos WHERE id = ?")
+    .get(eventoId) as RowGCLotes | undefined;
+
+  // se não achou, retorna false; se achou, true somente se === 1
+  return !!(row && Number(row.gc_lotes_on) === 1);
+}
+
+// --- SET status GC_LOTES por evento ---
+export function setStatusGCLotes(eventoId: number, on: boolean) {
+  db.prepare("UPDATE eventos SET gc_lotes_on = ? WHERE id = ?").run(
+    on ? 1 : 0,
+    eventoId
+  );
+}
+
 // Criação da tabela
 export function criarTabelaLotes() {
   db.prepare(
@@ -372,8 +410,7 @@ export function getRelatorioDoEvento(eventoId: number): LoteRelatorio[] {
       nome_animal: l.nome_animal,
       valor: valorNumber,
       condicao_pagamento: l.condicao_pagamento ?? "",
-      valor_total: valorTotal
+      valor_total: valorTotal,
     };
   });
 }
-

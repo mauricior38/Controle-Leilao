@@ -11,22 +11,24 @@ export interface Evento {
   condicao_pagamento_padrao?: string | null;
 }
 
-// ✅ Resolve o caminho absoluto do banco de dados
 const dbPath = path.resolve(__dirname, "../../data.db");
 const db = new Database(dbPath);
 
 export function criarTabelaEventos() {
-  const stmt = db.prepare(`
+  db.prepare(
+    `
     CREATE TABLE IF NOT EXISTS eventos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
       data TEXT NOT NULL,
-      descricao TEXT
+      descricao TEXT,
+      start_time TEXT,
+      end_time TEXT,
+      condicao_pagamento_padrao TEXT
     )
-  `);
-  stmt.run();
+  `
+  ).run();
 
-  // ✅ Tabela de lotes
   db.prepare(
     `
     CREATE TABLE IF NOT EXISTS lotes (
@@ -44,11 +46,10 @@ export function criarTabelaEventos() {
       condicao_pagamento TEXT,
       FOREIGN KEY (evento_id) REFERENCES eventos(id) ON DELETE CASCADE,
       UNIQUE (evento_id, lote)
-    );
+    )
   `
   ).run();
 
-  // ✅ Tabela lote_em_pista
   db.prepare(
     `
     CREATE TABLE IF NOT EXISTS lote_em_pista (
@@ -59,19 +60,17 @@ export function criarTabelaEventos() {
       FOREIGN KEY (id_evento) REFERENCES eventos(id) ON DELETE CASCADE,
       FOREIGN KEY (id_lote) REFERENCES lotes(id) ON DELETE CASCADE,
       UNIQUE (id_evento, id_lote)
-    );
+    )
   `
   ).run();
 
-  // 🔍 Índices para lote_em_pista
   db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_lote_em_pista_evento ON lote_em_pista (id_evento);`
+    `CREATE INDEX IF NOT EXISTS idx_lote_em_pista_evento ON lote_em_pista (id_evento)`
   ).run();
   db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_lote_em_pista_lote ON lote_em_pista (id_lote);`
+    `CREATE INDEX IF NOT EXISTS idx_lote_em_pista_lote ON lote_em_pista (id_lote)`
   ).run();
 
-  // ✅ Tabela lances
   db.prepare(
     `
     CREATE TABLE IF NOT EXISTS lances (
@@ -82,31 +81,18 @@ export function criarTabelaEventos() {
       timestamp TEXT NOT NULL,
       FOREIGN KEY (id_evento) REFERENCES eventos(id) ON DELETE CASCADE,
       FOREIGN KEY (id_lote) REFERENCES lotes(id) ON DELETE CASCADE
-    );
-  `
-  ).run();
-
-  // 🔍 Índices para lances
-  db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_lances_evento ON lances (id_evento);`
-  ).run();
-  db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_lances_lote ON lances (id_lote);`
-  ).run();
-  db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_lances_timestamp ON lances (timestamp);`
-  ).run();
-
-  db.prepare(
-    `
-    CREATE TABLE IF NOT EXISTS lances (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      id_evento INTEGER NOT NULL,
-      id_lote INTEGER NOT NULL,
-      valor REAL NOT NULL,
-      timestamp TEXT NOT NULL
     )
   `
+  ).run();
+
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_lances_evento ON lances (id_evento)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_lances_lote ON lances (id_lote)`
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_lances_timestamp ON lances (timestamp)`
   ).run();
 
   db.prepare(
@@ -122,14 +108,17 @@ export function criarTabelaEventos() {
 
   db.prepare(
     `
-  CREATE TABLE IF NOT EXISTS gc_duas_linhas_no_ar (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    evento_id INTEGER NOT NULL,
-    gc_id INTEGER NOT NULL,
-    FOREIGN KEY (gc_id) REFERENCES gc_duas_linhas(id)
+    CREATE TABLE IF NOT EXISTS gc_duas_linhas_no_ar (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      evento_id INTEGER NOT NULL,
+      gc_id INTEGER NOT NULL,
+      FOREIGN KEY (gc_id) REFERENCES gc_duas_linhas(id)
     )
   `
   ).run();
+
+  // Coluna de status GC LOTES (on/off) no evento
+  adicionarColunaGCLotesSeNaoExistir_safe();
 }
 
 export function listarEventos(): Evento[] {
@@ -157,14 +146,12 @@ export function inserirEvento(
 }
 
 export function getEventoPorId(id: number): Evento | null {
-  const stmt = db.prepare("SELECT * FROM eventos WHERE id = ?");
-  const evento = stmt.get(id);
+  const evento = db.prepare("SELECT * FROM eventos WHERE id = ?").get(id);
   return evento ? (evento as Evento) : null;
 }
 
 export function deletarEvento(id: number): boolean {
-  const stmt = db.prepare("DELETE FROM eventos WHERE id = ?");
-  const result = stmt.run(id);
+  const result = db.prepare("DELETE FROM eventos WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
@@ -174,10 +161,9 @@ export function editarEvento(
   data: string,
   descricao?: string
 ) {
-  const stmt = db.prepare(
+  db.prepare(
     "UPDATE eventos SET nome = ?, data = ?, descricao = ? WHERE id = ?"
-  );
-  stmt.run(nome, data, descricao || null, id);
+  ).run(nome, data, descricao || null, id);
 }
 
 export function encerrarEvento(id: number, endTime: string): void {
@@ -195,4 +181,34 @@ export function adicionarColunaCondicaoPagamentoPadrao() {
       "✅ Coluna 'condicao_pagamento_padrao' adicionada à tabela eventos."
     );
   }
+}
+
+/** GC LOTES: coluna booleana no evento */
+export function adicionarColunaGCLotesSeNaoExistir_safe() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(eventos)").all() as {
+      name: string;
+    }[];
+    const existe = cols.some((c) => c.name === "gc_lotes_on");
+    if (!existe) {
+      db.prepare(
+        "ALTER TABLE eventos ADD COLUMN gc_lotes_on INTEGER DEFAULT 0"
+      ).run();
+      console.log("✅ Coluna 'gc_lotes_on' criada em 'eventos'");
+    }
+  } catch (err) {
+    console.error("Erro ao verificar/criar coluna gc_lotes_on:", err);
+  }
+}
+export function getStatusGCLotes(eventoId: number): boolean {
+  const row = db
+    .prepare(`SELECT gc_lotes_on FROM eventos WHERE id = ?`)
+    .get(eventoId) as { gc_lotes_on?: number } | undefined;
+  return row?.gc_lotes_on === 1;
+}
+export function setStatusGCLotes(eventoId: number, on: boolean) {
+  db.prepare(`UPDATE eventos SET gc_lotes_on = ? WHERE id = ?`).run(
+    on ? 1 : 0,
+    eventoId
+  );
 }

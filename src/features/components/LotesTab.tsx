@@ -20,6 +20,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { apiFetch } from "@/lib/api";
 
 interface Lote {
   qtd_lances: ReactNode;
@@ -95,36 +96,47 @@ export default function LotesTab({
   }, [refresh]);
 
   useEffect(() => {
-    fetch(`http://localhost:3030/eventos/${eventoId}/lotes`)
-      .then((res) => res.json())
-      .then(setLotes);
+    async function carregarInicial() {
+      try {
+        const res = await apiFetch(`/eventos/${eventoId}/lotes`);
+        const data = await res.json();
+        setLotes(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error("Erro ao carregar lotes:", err);
+        setLotes([]);
+      }
+    }
+    carregarInicial();
   }, [eventoId, refresh]);
 
   useEffect(() => {
-    const params = new URLSearchParams({
-      search,
-      searchBy,
-      page: String(page),
-      limit: String(limit),
-    });
-
-    fetch(`http://localhost:3030/eventos/${eventoId}/lotes?${params}`)
-      .then((res) => res.json())
-      .then((data) => {
+    async function carregarPaginado() {
+      try {
+        const params = new URLSearchParams({
+          search,
+          searchBy,
+          page: String(page),
+          limit: String(limit),
+        });
+        const res = await apiFetch(
+          `/eventos/${eventoId}/lotes?${params.toString()}`
+        );
+        const data = await res.json();
         setLotes(Array.isArray(data.lotes) ? data.lotes : []);
         setTotal(typeof data.total === "number" ? data.total : 0);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("Erro ao buscar lotes:", err);
         setLotes([]);
         setTotal(0);
-      });
-  }, [eventoId, localRefresh, search, page]);
+      }
+    }
+    carregarPaginado();
+  }, [eventoId, localRefresh, search, page, searchBy]);
 
   async function handleColocarEmPista(loteId: number) {
     try {
-      const res = await fetch(
-        `http://localhost:3030/eventos/${eventoId}/lotes/${loteId}/colocar-em-pista`,
+      const res = await apiFetch(
+        `/eventos/${eventoId}/lotes/${loteId}/colocar-em-pista`,
         { method: "POST" }
       );
       if (res.ok) {
@@ -132,10 +144,10 @@ export default function LotesTab({
         setLocalRefresh((r) => r + 1);
         onRefreshPista?.();
       } else {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({}));
         toast.error(
-          "Erro ao colocar lote em pista: " + error?.error ||
-            "Erro desconhecido"
+          "Erro ao colocar lote em pista: " +
+            (error?.error || "Erro desconhecido")
         );
       }
     } catch (err) {
@@ -145,32 +157,39 @@ export default function LotesTab({
   }
 
   async function handleAtualizarStatus(lote: Lote) {
-    const res = await fetch(`http://localhost:3030/lotes/${lote.id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: lote.status }),
-    });
+    try {
+      const res = await apiFetch(`/lotes/${lote.id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: lote.status }),
+      });
 
-    if (res.ok) {
-      toast.success(`Status atualizado para ${lote.status}`);
-      setLocalRefresh((r) => r + 1);
-      if (lote.status === "vendido" && onRefreshPista) {
-        onRefreshPista();
+      if (res.ok) {
+        toast.success(`Status atualizado para ${lote.status}`);
+        setLocalRefresh((r) => r + 1);
+        if (lote.status === "vendido" && onRefreshPista) {
+          onRefreshPista();
+        }
+      } else {
+        toast.error("Erro ao atualizar status");
       }
-    } else {
+    } catch (err) {
+      console.error(err);
       toast.error("Erro ao atualizar status");
     }
   }
 
   async function handleExcluir(id: number) {
     if (!confirm("Deseja realmente excluir este lote?")) return;
-    const res = await fetch(`http://localhost:3030/lotes/${id}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      toast.success("Lote excluído com sucesso");
-      setLocalRefresh((r) => r + 1);
-    } else {
+    try {
+      const res = await apiFetch(`/lotes/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Lote excluído com sucesso");
+        setLocalRefresh((r) => r + 1);
+      } else {
+        toast.error("Erro ao excluir lote");
+      }
+    } catch (err) {
+      console.error(err);
       toast.error("Erro ao excluir lote");
     }
   }
@@ -184,52 +203,45 @@ export default function LotesTab({
     formData.append("evento_id", String(eventoId));
 
     try {
-      const res = await fetch("http://localhost:3030/lotes/upload", {
+      const res = await apiFetch(`/lotes/upload`, {
         method: "POST",
-        body: formData,
+        body: formData, // << FormData, sem headers manuais
       });
 
       if (res.ok) {
         toast.success("Lotes importados com sucesso!");
         setLocalRefresh((r) => r + 1);
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      if (String(err.message || "").includes("HTTP 401")) {
+        toast.error(
+          "Não autorizado. Configure o token da API nas Configurações."
+        );
       } else {
         toast.error("Erro ao importar lotes");
       }
-    } catch (err) {
-      toast.error("Erro de rede ao importar");
       console.error(err);
+    } finally {
+      event.target.value = "";
     }
-
-    event.target.value = "";
   }
 
-  function handleAbrirLancesDialog(idLote: number) {
-    fetch(`http://localhost:3030/lotes/${idLote}/lances`)
-      .then((res) => res.json())
-      .then((data) => {
-        setLancesDoLote(data);
-        setDialogLancesAberto(true);
-      });
+  async function handleAbrirLancesDialog(idLote: number) {
+    try {
+      const res = await apiFetch(`/lotes/${idLote}/lances`);
+      const data = await res.json();
+      setLancesDoLote(Array.isArray(data) ? data : []);
+      setDialogLancesAberto(true);
+    } catch (err) {
+      toast.error("Erro ao carregar lances");
+      console.error(err);
+    }
   }
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center gap-4">
-        <Select
-          value={searchBy}
-          onValueChange={(value) =>
-            setSearchBy(value as "lote" | "nome_animal")
-          }
-        >
-          <SelectTrigger className="w-[170px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="lote">Número do Lote</SelectItem>
-            <SelectItem value="nome_animal">Nome do Animal</SelectItem>
-          </SelectContent>
-        </Select>
-
         {condicaoPagamento === "outro" && (
           <Input
             placeholder="Informe a condição de pagamento"
@@ -238,16 +250,32 @@ export default function LotesTab({
           />
         )}
 
-        <Input
-          placeholder="Buscar por nome ou lote..."
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-          className="max-w-sm"
-        />
+        <div className="flex gap-2 w-2/3">
+          <Select
+            value={searchBy}
+            onValueChange={(value) =>
+              setSearchBy(value as "lote" | "nome_animal")
+            }
+          >
+            <SelectTrigger className="w-[170px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lote">Número do Lote</SelectItem>
+              <SelectItem value="nome_animal">Nome do Animal</SelectItem>
+            </SelectContent>
+          </Select>
 
+          <Input
+            placeholder="Buscar por nome ou lote..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            className="max-w-sm"
+          />
+        </div>
         <div className="flex items-center gap-2">
           <Dialog
             open={
@@ -257,7 +285,7 @@ export default function LotesTab({
             <DialogTrigger asChild>
               <Button
                 className="gap-2"
-                onClick={() => setModalCopiarAberto(true)} // 👉 ative o modal como no copiar
+                onClick={() => setModalCopiarAberto(true)}
               >
                 <PlusCircle size={16} /> Novo Lote
               </Button>
@@ -269,8 +297,8 @@ export default function LotesTab({
               <CadastrarLoteModal
                 eventoId={eventoId}
                 onSuccess={() => {
-                  setModalCopiarAberto(false); // ✅ fecha o modal
-                  setLocalRefresh((r) => r + 1); // ✅ atualiza a lista
+                  setModalCopiarAberto(false);
+                  setLocalRefresh((r) => r + 1);
                 }}
               />
             </DialogContent>
@@ -352,7 +380,6 @@ export default function LotesTab({
               <div className="flex gap-2 items-center">
                 {lote.status === "aguardando" && (
                   <Button
-                    // className="mt-2"
                     variant="aguardando_pista"
                     onClick={() => handleColocarEmPista(lote.id)}
                   >

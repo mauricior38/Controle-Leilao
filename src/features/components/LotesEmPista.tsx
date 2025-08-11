@@ -3,6 +3,8 @@ import { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api";
+import GCOverlayButton from "./GCOverlayButton";
 
 interface Lote {
   id: number;
@@ -26,54 +28,69 @@ export function LoteEmPista({
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function carregarLotes() {
-    const res = await fetch(
-      `http://localhost:3030/eventos/${idEvento}/lotes-em-pista`
-    );
-    const data = await res.json();
-    setLotes(data);
+    try {
+      const res = await apiFetch(`/eventos/${idEvento}/lotes-em-pista`);
+      const data = await res.json();
+      setLotes(data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Falha ao carregar lotes em pista");
+    }
   }
 
   useEffect(() => {
     carregarLotes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idEvento, refresh]);
 
   async function atualizarValor(novoValor: number) {
-    setValorAtual(novoValor);
-    await fetch(`http://localhost:3030/eventos/${idEvento}/lances`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ valor: novoValor }),
-    });
-    await carregarLotes();
-    onRefreshLotes?.();
+    try {
+      setValorAtual(novoValor);
+      await apiFetch(`/eventos/${idEvento}/lances`, {
+        method: "POST",
+        body: JSON.stringify({ valor: novoValor }),
+      });
+      await carregarLotes();
+      onRefreshLotes?.();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erro ao atualizar valor");
+    }
   }
 
   async function venderLote(idLote: number) {
-    await fetch(
-      `http://localhost:3030/eventos/${idEvento}/lotes/${idLote}/vender`,
-      {
+    try {
+      await apiFetch(`/eventos/${idEvento}/lotes/${idLote}/vender`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valor: valorAtual }), // 💡 Enviar valor atual
-      }
-    );
-    toast.success("Lote vendido");
-    carregarLotes();
-    onRefreshLotes?.();
+        body: JSON.stringify({ valor: valorAtual }),
+      });
+      toast.success("Lote vendido");
+      await carregarLotes();
+      onRefreshLotes?.();
+      atualizarValor(0);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erro ao vender lote");
+    }
   }
 
   async function venderTodos() {
-    await fetch(
-      `http://localhost:3030/eventos/${idEvento}/lotes/vender-todos`,
-      {
+    try {
+      await apiFetch(`/eventos/${idEvento}/lotes/vender-todos`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ valor: valorAtual }),
-      }
-    );
-    toast.success("Todos os lotes vendidos");
-    await carregarLotes();
-    onRefreshLotes?.();
+      });
+      toast.success("Todos os lotes vendidos");
+      await carregarLotes();
+      onRefreshLotes?.();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Erro ao vender todos os lotes");
+    }
   }
 
   const formatBRL = (n: number) =>
@@ -86,13 +103,23 @@ export function LoteEmPista({
     <div className="w-full bg-muted rounded-xl p-4 space-y-4 mb-4">
       <h2 className="text-xl font-bold">Lotes em Pista</h2>
 
+      <GCOverlayButton
+        eventoId={idEvento}
+        targetVmix="vmix1" // ou "vmix2", se preferir
+        overlay={1} // 1..4 conforme seu padrão
+        vmixInput="LowerThirdGC" // ou "1", dep. do seu setup
+        className="ml-2"
+        labelOff="GC LOTE OFF"
+        labelOn="GC LOTE ON"
+      />
+
       <div className="flex items-center gap-4">
         <Input
           ref={inputRef}
           type="text"
           value={`R$ ${formatBRL(valorAtual)}`}
           onChange={(e) => {
-            const raw = e.target.value.replace(/\D/g, ""); // Remove tudo que não for número
+            const raw = e.target.value.replace(/\D/g, "");
             setValorAtual(Number(raw || 0));
           }}
           onKeyDown={(e) => {
@@ -100,17 +127,10 @@ export function LoteEmPista({
           }}
         />
       </div>
-
       <div className="flex flex-wrap gap-2">
         {[
           -1000, -100, -50, -20, -10, 0, 10, 20, 50, 100, 1000, 5000, 10000,
         ].map((valor) => {
-          const formatBRL = (n: number) =>
-            new Intl.NumberFormat("pt-BR", {
-              minimumFractionDigits: 0,
-              maximumFractionDigits: 0,
-            }).format(n);
-
           const isNegativeTooBig = valor < 0 && valorAtual + valor < 0;
 
           return (
@@ -132,7 +152,7 @@ export function LoteEmPista({
                 }
               }}
             >
-              R${" "}
+              R{"$ "}
               {valor === 0
                 ? "Zerar valor atual"
                 : valor > 0
@@ -142,7 +162,6 @@ export function LoteEmPista({
           );
         })}
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {lotes.map((lote) => (
           <div
@@ -170,7 +189,6 @@ export function LoteEmPista({
           </div>
         ))}
       </div>
-
       {lotes.length > 1 && (
         <Button variant="destructive" onClick={venderTodos}>
           Vender Todos os Lotes

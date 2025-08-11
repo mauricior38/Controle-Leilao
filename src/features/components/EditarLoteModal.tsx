@@ -1,12 +1,13 @@
 // src/features/lotes/components/EditarLoteModal.tsx
 import { z } from "zod";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api";
 
 const formSchema = z.object({
   valor: z.coerce.number(),
@@ -59,7 +60,6 @@ export default function EditarLoteModal({
 
   useEffect(() => {
     if (!lote) return;
-
     reset({
       valor: lote.valor,
       lote: lote.lote,
@@ -75,33 +75,35 @@ export default function EditarLoteModal({
   }, [lote, reset]);
 
   async function onSubmit(data: FormData) {
-    const url =
-      modo === "copia"
-        ? "http://localhost:3030/lotes"
-        : `http://localhost:3030/lotes/${lote.id}`;
+    try {
+      const url =
+        modo === "copia" ? `/lotes` : `/lotes/${lote.id}`;
+      const method = modo === "copia" ? "POST" : "PATCH";
 
-    const method = modo === "copia" ? "POST" : "PATCH";
+      const payload = {
+        ...data,
+        ...(modo === "copia" ? { evento_id: eventoId } : {}),
+      };
 
-    const payload = {
-      ...data,
-      ...(modo === "copia" ? { evento_id: eventoId } : {}),
-    };
+      const res = await apiFetch(url, {
+        method,
+        body: JSON.stringify(payload),
+      });
 
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      toast.success(
-        modo === "copia"
-          ? "Lote copiado com sucesso"
-          : "Lote atualizado com sucesso"
-      );
-      onSuccess(); // <- Atualiza a lista automaticamente
-    } else {
-      toast.error("Erro ao salvar lote");
+      if (res.ok) {
+        toast.success(
+          modo === "copia"
+            ? "Lote copiado com sucesso"
+            : "Lote atualizado com sucesso"
+        );
+        onSuccess();
+      } else {
+        toast.error("Erro ao salvar lote");
+      }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || "Erro ao salvar lote");
     }
   }
 
@@ -149,7 +151,7 @@ export default function EditarLoteModal({
 
       <div className="flex justify-end">
         <Button type="submit" disabled={isSubmitting}>
-          Salvar
+          {isSubmitting ? "Salvando..." : "Salvar"}
         </Button>
       </div>
     </form>
